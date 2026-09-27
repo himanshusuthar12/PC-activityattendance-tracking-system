@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Dashboard - TimesheetManager</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;font-family:Inter,Segoe UI,Arial;background:#0f172a;color:#e2e8f0}
+  header{position:sticky;top:0;background:#1e293b;border-bottom:1px solid #334155;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+  h1{margin:0;font-size:18px} .sub{color:#94a3b8;font-size:12px}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:20px}
+  .card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:16px}
+  .card h3{margin:0 0 8px;font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em}
+  .val{font-size:22px;font-weight:700;color:#f8fafc}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{color:#94a3b8;text-align:left;padding:10px 8px;border-bottom:1px solid #334155;font-weight:600}
+  td{padding:10px 8px;border-bottom:1px solid #1e293b;color:#cbd5e1}
+  .badge{font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid #334155;background:#0f172a}
+  .online{color:#4ade80;border-color:#14532d;background:#052e16}
+  a{color:#38bdf8;text-decoration:none} a:hover{text-decoration:underline}
+  .toolbar{display:flex;gap:10px;margin:12px 0;flex-wrap:wrap}
+  .toolbar button, .toolbar a{padding:8px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:12px;cursor:pointer;text-decoration:none}
+  .toolbar button:hover{background:#1e293b}
+  pre{background:#020617;border:1px solid #334155;border-radius:10px;padding:12px;overflow:auto;font-size:12px;max-height:360px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>TimesheetManager — PC Activity</h1>
+    <div class="sub">Backend C# <code>http://127.0.0.1:5000</code> • user binding via <code>/api/auth/me</code></div>
+  </div>
+  <div>
+    <a href="/">Login</a> &nbsp; <a href="/docs">Docs</a> &nbsp; <a href="/health">Health</a>
+  </div>
+</header>
+<div class="wrap">
+  <div class="grid">
+    <div class="card">
+      <h3>Bound User (backend users.id)</h3>
+      <div class="val" id="boundUser">—</div>
+      <div class="sub" id="boundSub"></div>
+    </div>
+    <div class="card">
+      <h3>Backend C# Status</h3>
+      <div class="val" id="backendStatus">checking…</div>
+      <div class="sub" id="backendSub"></div>
+    </div>
+    <div class="card">
+      <h3>Python Server DB</h3>
+      <div class="val" id="dbStatus">checking…</div>
+      <div class="sub" id="dbSub"></div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button onclick="loadAll()">Refresh All</button>
+    <button onclick="loadComputers()">Computers</button>
+    <button onclick="loadSessions()">Sessions</button>
+    <button onclick="loadEvents()">Events</button>
+    <button onclick="loadAttendance()">Attendance Today</button>
+    <a href="#" onclick="logout(event)">Logout</a>
+  </div>
+
+  <div class="card">
+    <h3>Computers (filtered by your user_id if DB enabled)</h3>
+    <div style="overflow:auto">
+      <table id="tblComputers"><thead><tr><th>Computer</th><th>Username</th><th>user_id</th><th>Platform</th><th>Last Seen</th><th>Online</th></tr></thead><tbody><tr><td colspan="6" style="color:#64748b">Click Refresh</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Recent Sessions</h3>
+    <table id="tblSessions"><thead><tr><th>Session</th><th>Computer</th><th>Username</th><th>user_id</th><th>Started</th><th>Stopped</th></tr></thead><tbody><tr><td colspan="6" style="color:#64748b">—</td></tr></tbody></table>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Raw Output</h3>
+    <pre id="raw">—</pre>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+
+async function jget(path){
+  const r = await fetch(API + path);
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(JSON.stringify(j));
+  return j;
+}
+
+function setRaw(o){ document.getElementById('raw').textContent = typeof o==='string' ? o : JSON.stringify(o,null,2); }
+
+async function loadMe(){
+  try{
+    const me = await jget('/api/auth/me');
+    const a = me.auth || {};
+    document.getElementById('boundUser').textContent = `${a.fullName || a.email || 'user'} (id=${a.user_id})`;
+    document.getElementById('boundSub').textContent = a.email + ' • token ' + (a.token ? 'present' : 'none');
+    localStorage.setItem('tm_user_id', String(a.user_id));
+    return a;
+  }catch(e){
+    document.getElementById('boundUser').textContent = 'Not bound';
+    document.getElementById('boundSub').innerHTML = '<a href="/">Go to login →</a>';
+    return null;
+  }
+}
+
+async function loadHealth(){
+  try{
+    const h = await jget('/health');
+    const b = h.backend_csharp || {};
+    document.getElementById('backendStatus').textContent = b.connected ? 'Connected' : 'Not reachable';
+    document.getElementById('backendStatus').style.color = b.connected ? '#4ade80' : '#f87171';
+    document.getElementById('backendSub').textContent = h.backend_url + ' • ' + (b.status || b.error || '');
+    document.getElementById('dbStatus').textContent = h.database.includes('connected') ? 'Connected' : h.database.includes('skipped') ? 'Skipped (no MSSQL)' : 'Error';
+    document.getElementById('dbSub').textContent = h.database;
+  }catch(e){ setRaw('health error: '+e.message); }
+}
+
+let currentUserId = null;
+
+async function loadComputers(){
+  try{
+    const q = currentUserId ? `?user_id=${currentUserId}` : '';
+    const data = await jget('/api/v1/computers'+q);
+    const rows = Array.isArray(data) ? data : (data.data || []);
+    setRaw(data);
+    const tb = document.querySelector('#tblComputers tbody');
+    if(!rows.length) tb.innerHTML='<tr><td colspan="6" style="color:#64748b">No computers yet - start the agent (python main.py)</td></tr>';
+    else tb.innerHTML = rows.map(r=>`
+      <tr>
+        <td>${r.computer_name||''}</td>
+        <td>${r.username||''}</td>
+        <td><span class="badge">${r.user_id ?? '—'}</span></td>
+        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.platform||''}</td>
+        <td>${r.last_seen_at||r.last_heartbeat||''}</td>
+        <td>${r.online?'<span class="badge online">online</span>':'<span class="badge">offline</span>'}</td>
+      </tr>`).join('');
+  }catch(e){ setRaw('computers error: '+e.message); }
+}
+
+async function loadSessions(){
+  try{
+    const q = currentUserId ? `?user_id=${currentUserId}` : '';
+    const data = await jget('/api/v1/sessions'+q);
+    const rows = Array.isArray(data) ? data : (data.data || []);
+    setRaw(data);
+    const tb = document.querySelector('#tblSessions tbody');
+    if(!rows.length) tb.innerHTML='<tr><td colspan="6" style="color:#64748b">No sessions</td></tr>';
+    else tb.innerHTML = rows.slice(0,20).map(r=>`
+      <tr>
+        <td style="font-family:monospace;font-size:11px">${(r.session_id||'').slice(0,8)}…</td>
+        <td>${r.computer_name||''}</td>
+        <td>${r.username||''}</td>
+        <td><span class="badge">${r.user_id ?? '—'}</span></td>
+        <td>${r.started_at||''}</td>
+        <td>${r.stopped_at||''}</td>
+      </tr>`).join('');
+  }catch(e){ setRaw('sessions error: '+e.message); }
+}
+
+async function loadEvents(){
+  try{
+    const q = currentUserId ? `?user_id=${currentUserId}` : '';
+    const data = await jget('/api/v1/events'+q);
+    setRaw(data);
+  }catch(e){ setRaw('events error: '+e.message); }
+}
+
+async function loadAttendance(){
+  try{
+    const q = currentUserId ? `?user_id=${currentUserId}` : '';
+    const data = await jget('/api/v1/attendance/daily'+q);
+    setRaw(data);
+  }catch(e){ setRaw('attendance error: '+e.message); }
+}
+
+async function loadAll(){
+  const me = await loadMe();
+  currentUserId = me ? me.user_id : (parseInt(localStorage.getItem('tm_user_id')||'0')||null);
+  await loadHealth();
+  await loadComputers();
+}
+
+async function logout(e){
+  e.preventDefault();
+  if(!confirm('Clear bound user and logout?')) return;
+  try{ await fetch(API+'/api/auth/logout',{method:'DELETE'});}catch{}
+  localStorage.clear();
+  location.href='/';
+}
+
+loadAll();
+</script>
+</body>
+</html>

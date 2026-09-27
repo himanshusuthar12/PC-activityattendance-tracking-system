@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TimesheetManager - Login</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:32px 28px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  h1{margin:0 0 6px;font-size:22px;color:#f8fafc} .sub{color:#94a3b8;font-size:13px;margin-bottom:22px;line-height:1.5}
+  label{font-size:13px;color:#cbd5e1;display:block;margin:14px 0 6px}
+  input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#f1f5f9;outline:none;font-size:14px}
+  input:focus{border-color:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.15)}
+  button{width:100%;margin-top:20px;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,#38bdf8,#6366f1);color:#fff;font-weight:600;font-size:14px;cursor:pointer;transition:opacity .2s}
+  button:hover{opacity:.92} button:disabled{opacity:.5;cursor:not-allowed}
+  .msg{margin-top:14px;padding:10px 12px;border-radius:10px;font-size:13px;display:none;white-space:pre-wrap;word-break:break-word}
+  .msg.err{background:#450a0a;color:#fecaca;border:1px solid #7f1d1d;display:block}
+  .msg.ok{background:#022c22;color:#a7f3d0;border:1px solid #065f46;display:block}
+  .meta{margin-top:18px;font-size:12px;color:#64748b;text-align:center}
+  .meta a{color:#38bdf8;text-decoration:none} .meta a:hover{text-decoration:underline}
+  .badge{display:inline-block;font-size:11px;padding:4px 8px;border-radius:999px;background:#0f172a;border:1px solid #334155;color:#94a3b8;margin-bottom:12px}
+  .row{display:flex;gap:10px;margin-top:12px}
+  .row a{flex:1;text-align:center;padding:10px;border-radius:10px;border:1px solid #334155;color:#cbd5e1;text-decoration:none;font-size:13px}
+  .row a:hover{background:#0f172a}
+  code{font-size:11px;background:#0f172a;padding:2px 6px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="badge">PC Activity / Attendance - TimesheetManager</div>
+  <h1>Sign in</h1>
+  <div class="sub">Enter your <b>backend</b> credentials (users table). Verified against <code id="backendUrl">http://127.0.0.1:5000</code> via <code>/api/auth/login</code>. Your <code>users.id</code> will tag all activity.</div>
+
+  <label>Email / User ID</label>
+  <input id="email" type="email" placeholder="e.g. admin@udaaann.com" autocomplete="username" autofocus/>
+
+  <label>Password</label>
+  <input id="password" type="password" placeholder="••••••••" autocomplete="current-password"/>
+
+  <button id="btn">Sign in & Start Tracking</button>
+
+  <div id="msg" class="msg"></div>
+
+  <div class="row">
+    <a href="/health" target="_blank">Health</a>
+    <a href="/docs" target="_blank">API Docs</a>
+    <a href="#" id="logoutLink">Logout</a>
+  </div>
+
+  <div class="meta">
+    Backend C# port 5000 (UsersController). No C# code changed.<br/>
+    After login, events are stored with <code>user_id</code> in <code>TimesheetManager</code>.<br/>
+    <a href="/dashboard">Go to Dashboard →</a>
+  </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin; // Python server http://127.0.0.1:8000
+const BACKEND_BASE = localStorage.getItem('backend_url') || 'http://127.0.0.1:5000';
+document.getElementById('backendUrl').textContent = BACKEND_BASE;
+
+const emailEl = document.getElementById('email');
+const passEl = document.getElementById('password');
+const btn = document.getElementById('btn');
+const msgEl = document.getElementById('msg');
+
+function showMsg(text, ok=false){
+  msgEl.textContent = text;
+  msgEl.className = 'msg ' + (ok ? 'ok' : 'err');
+  msgEl.style.display = 'block';
+}
+function clearMsg(){ msgEl.style.display='none'; msgEl.textContent=''; }
+
+// Pre-fill if already bound
+(async ()=>{
+  try{
+    const r = await fetch(API_BASE + '/api/auth/me');
+    if(r.ok){
+      const j = await r.json();
+      const a = j.auth || {};
+      if(a.email) emailEl.value = a.email;
+      showMsg(`Already bound as ${a.fullName || a.email} (user_id=${a.user_id}). You can re-login or go to dashboard.`, true);
+    }
+  }catch{}
+  // fetch health to show backend url
+  try{
+    const h = await fetch(API_BASE + '/health'); const hj = await h.json();
+    if(hj.backend_url) {
+      document.getElementById('backendUrl').textContent = hj.backend_url;
+      localStorage.setItem('backend_url', hj.backend_url);
+    }
+  }catch{}
+})();
+
+async function doLogin(){
+  clearMsg();
+  const email = emailEl.value.trim();
+  const password = passEl.value;
+  if(!email || !password){ showMsg('Email and password are required.'); return; }
+  btn.disabled = true; btn.textContent = 'Signing in...';
+  try{
+    // Use Python server proxy -> it forwards to C# backend port 5000 and saves user_id
+    const resp = await fetch(API_BASE + '/api/auth/login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email, password})
+    });
+    const data = await resp.json().catch(()=>({}));
+    if(!resp.ok){
+      const detail = data.detail || data.message || JSON.stringify(data);
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    const user = data.user || {};
+    const userId = data.user_id || user.id || user.Id;
+    // Save locally too
+    localStorage.setItem('tm_token', data.token || '');
+    localStorage.setItem('tm_user', JSON.stringify(user));
+    localStorage.setItem('tm_user_id', String(userId));
+    showMsg(`✓ Logged in as ${user.fullName || user.email || email} (users.id=${userId})\nToken saved. All PC activity will be stored with user_id=${userId}.`, true);
+    setTimeout(()=> window.location.href = '/dashboard', 900);
+  }catch(e){
+    showMsg('Login failed: ' + (e.message || e), false);
+  }finally{
+    btn.disabled=false; btn.textContent='Sign in & Start Tracking';
+  }
+}
+
+btn.addEventListener('click', doLogin);
+passEl.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+emailEl.addEventListener('keydown', e=>{ if(e.key==='Enter') passEl.focus(); });
+
+document.getElementById('logoutLink').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  try{ await fetch(API_BASE + '/api/auth/logout', {method:'DELETE'}); }catch{}
+  localStorage.removeItem('tm_token'); localStorage.removeItem('tm_user'); localStorage.removeItem('tm_user_id');
+  showMsg('Logged out. Auth cleared.', true);
+  emailEl.value=''; passEl.value='';
+});
+</script>
+</body>
+</html>
